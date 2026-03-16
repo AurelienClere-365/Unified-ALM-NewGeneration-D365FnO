@@ -1,0 +1,199 @@
+name: $(Date:yy.MM.dd)$(Rev:.r)
+
+# Pipeline parameters for environment-specific values
+parameters:
+  - name: environmentName
+    type: string
+    default: 'UAT'
+    displayName: 'Deployment Environment Name'
+  
+  - name: branchName
+    type: string
+    default: 'test'
+    displayName: 'Source Branch Name'
+  
+  - name: lcsProjectId
+    type: string
+    default: ''
+    displayName: 'LCS Project ID'
+  
+  - name: lcsEnvironmentId
+    type: string
+    default: ''
+    displayName: 'LCS Environment ID'
+  
+  - name: lcsServiceConnection
+    type: string
+    default: 'LCS'
+    displayName: 'LCS Service Connection Name'
+  
+  - name: azureDevOpsEnvironment
+    type: string
+    default: 'D365FO-UAT'
+    displayName: 'Azure DevOps Environment'
+
+trigger:
+  - none
+
+# 🔒 Global pool — applies to ALL stages and jobs
+pool:
+  vmImage: 'windows-latest'
+
+schedules:
+  - cron: "0 2 * * *" # 2:00 every day
+    displayName: Daily Build and deploy at 02:00 UTC on Tests env
+    branches:
+      include:
+        - ${{ parameters.branchName }}
+    always: false
+
+# Variables centralisées
+variables:
+  - name: App1Package
+    value: 'Microsoft.Dynamics.AX.Application1.DevALM.BuildXpp'
+  - name: App2Package
+    value: 'Microsoft.Dynamics.AX.Application2.DevALM.BuildXpp'
+  - name: AppSuitePackage
+    value: 'Microsoft.Dynamics.AX.ApplicationSuite.DevALM.BuildXpp'
+  - name: PlatPackage
+    value: 'Microsoft.Dynamics.AX.Platform.DevALM.BuildXpp'
+  - name: ToolsPackage
+    value: 'Microsoft.Dynamics.AX.Platform.CompilerPackage'
+  - name: MetadataPath
+    value: '$(Build.SourcesDirectory)\Metadata'
+  - name: NugetConfigsPath
+    value: '$(Build.SourcesDirectory)\Tools\Build'
+  - name: NugetsPath
+    value: '$(Pipeline.Workspace)\NuGets'
+
+stages:
+  # ---------- Stage 1: Build ----------
+  - stage: Build
+    displayName: X++ Build & Package
+    jobs:
+      - job: BuildXpp
+        displayName: Build solution and create deployable package
+        steps:
+          # Cache NuGet packages
+          - task: Cache@2
+            displayName: 'Cache NuGet packages'
+            inputs:
+              key: 'nuget | "$(Agent.OS)" | $(NugetConfigsPath)/packages.config'
+              path: '$(NugetsPath)'
+              restoreKeys: |
+                nuget | "$(Agent.OS)"
+
+          # Install NuGet and use -ExcludeVersion option
+          - task: NuGetCommand@2
+            displayName: 'NuGet custom install Packages'
+            inputs:
+              command: custom
+              arguments: 'install -Noninteractive $(NugetConfigsPath)\packages.config -ConfigFile $(NugetConfigsPath)\nuget.config -Verbosity Detailed -ExcludeVersion -OutputDirectory "$(NugetsPath)"'
+
+          # Use the custom build number y.m.d.rev as the model version
+          - task: XppUpdateModelVersion@0
+            displayName: 'Update Model Version'
+            inputs:
+              XppSourcePath: '$(MetadataPath)'
+              VersionNumber: '$(Build.BuildNumber)'
+              XppLayer: 14
+
+          # Build using MSBuild 17 (VS 2022)
+          - task: VSBuild@1
+            displayName: 'Build Project.sln'
+            inputs:
+              solution: 'Projects/BuildProject/BuildProject.sln'
+              vsVersion: '17.0'
+              msbuildArgs: >
+                /p:BuildTasksDirectory="$(NugetsPath)\$(ToolsPackage)\DevAlm"
+                /p:MetadataDirectory="$(MetadataPath)"
+                /p:FrameworkDirectory="$(NuGetsPath)\$(ToolsPackage)"
+                /p:ReferenceFolder="$(NuGetsPath)\$(PlatPackage)\ref\net40;$(NuGetsPath)\$(App1Package)\ref\net40;$(NuGetsPath)\$(App2Package)\ref\net40;$(NuGetsPath)\$(AppSuitePackage)\ref\net40;$(MetadataPath);$(Build.BinariesDirectory)"
+                /p:ReferencePath="$(NuGetsPath)\$(ToolsPackage)"
+                /p:OutputDirectory="$(Build.BinariesDirectory)"
+
+          # Copy compiler log files to drop
+          - task: CopyFiles@2
+            displayName: 'Copy X++ Compile Log Files'
+            inputs:
+              SourceFolder: '$(Build.SourcesDirectory)'
+              Contents: |
+                **\Dynamics.AX.*.xppc.*
+                **\Dynamics.AX.*.labelc.*
+                **\Dynamics.AX.*.reportsc.*
+              TargetFolder: '$(Build.ArtifactStagingDirectory)\Logs'
+            condition: succeededOrFailed()
+
+          # Install specific NuGet version for packaging
+          - task: NuGetToolInstaller@0
+            displayName: 'Use NuGet 3.3.0'
+            inputs:
+              versionSpec: 3.3.0
+
+          # Create Deployable Package
+          - task: XppCreatePackage@2
+            displayName: Create Deployable Package
+            inputs:
+              XppToolsPath: '$(NuGetsPath)\$(ToolsPackage)'
+              XppBinariesPath: '$(Build.BinariesDirectory)'
+              CreateCloudPackage: true
+              CloudPackagePlatVersion: '7.0.7778.29'
+              CloudPackageAppVersion: '10.0.2428.63'
+              CloudPackageOutputLocation: '$(Build.ArtifactStagingDirectory)\CloudDeployablePackage_$(Build.BuildNumber)'
+              CreateRegularPackage: true
+              DeployablePackagePath: '$(Build.ArtifactStagingDirectory)\AXDeployableRuntime_$(Build.BuildNumber).zip'
+
+          # Enable to add license file to the package
+          - task: XppAddLicenseToPackage@0
+            displayName: 'Add Licenses to Deployable Package'
+            enabled: false
+
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Artifact: drop'
+            inputs:
+              PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+            condition: succeededOrFailed()
+
+  # ---------- Stage 2: Deploy to Environment ----------
+  - stage: UploadAndDeploy
+    displayName: 'Upload to LCS and Deploy'
+    dependsOn: Build
+    condition: succeeded()
+    jobs:
+      - deployment: DeployToEnvironment
+        displayName: 'Upload and Deploy to ${{ parameters.environmentName }}'
+        environment: '${{ parameters.azureDevOpsEnvironment }}'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: DownloadPipelineArtifact@2
+                  displayName: 'Download Build Artifacts'
+                  inputs:
+                    buildType: 'current'
+                    artifactName: 'drop'
+                    targetPath: '$(Pipeline.Workspace)'
+
+                - task: InstallMSALModule@1
+
+                - task: LCSAssetUpload@2
+                  name: UploadToLCS
+                  displayName: 'Upload to LCS - ${{ parameters.environmentName }}'
+                  inputs:
+                    serviceConnectionName: '${{ parameters.lcsServiceConnection }}'
+                    projectId: '${{ parameters.lcsProjectId }}'
+                    assetType: '10'
+                    assetPath: '$(Pipeline.Workspace)/AXDeployableRuntime_$(Build.BuildNumber).zip'
+                    assetName: '${{ parameters.branchName }} Branch ${{ parameters.environmentName }} $(Build.BuildNumber)'
+                    assetDescription: 'Release_$(Build.BuildNumber)'
+
+                - task: LCSAssetDeploy@4
+                  displayName: 'Deploy via LCS ${{ parameters.environmentName }}'
+                  inputs:
+                    serviceConnectionName: '${{ parameters.lcsServiceConnection }}'
+                    projectId: '${{ parameters.lcsProjectId }}'
+                    environmentId: '${{ parameters.lcsEnvironmentId }}'
+                    fileAssetId: '$(UploadToLCS.FileAssetId)'
+                    deploymentType: 'hq'
+                    releaseName: '${{ parameters.branchName }} Branch ${{ parameters.environmentName }} $(Build.BuildNumber)'
+                    waitForCompletion: false
