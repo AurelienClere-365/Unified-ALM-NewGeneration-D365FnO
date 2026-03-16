@@ -20,8 +20,8 @@ This project provides ready-to-use YAML pipelines to automate CI/CD workflows fo
 |-----------------------------------|--------------------------------------------------|
 | `xpp-ci.yml`                      | CI pipeline for building and packaging X++ code  |
 | `xpp-build-validation.yml`        | Validates X++ builds before deployment           |
-| `azure-build-pipelines-main.yml`  | Main branch build pipeline                       |
-| `azure-build-pipelines-test.yml`  | Test/UAT environment build pipeline              |
+| `azure-build-pipelines-main.yml`  | Main branch build pipeline in LCS mode                       |
+| `azure-build-pipelines-test.yml`  | Test/UAT environment build pipeline in LCS mode             |
 | `pac-modelbuilder-*.yml`          | Manage Power Platform model builder environments |
 | `lcs-db-refresh-export.yml`       | Automate LCS database refresh/export             |
 | `bpa-apps-dataverse.yml`          | BPA deployment to Dataverse                      |
