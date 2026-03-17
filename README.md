@@ -1,4 +1,4 @@
-# Unifield-ALM-NewGeneration-D365FnO
+# Unified-ALM-NewGeneration-D365FnO
 
 A collection of Azure DevOps pipeline templates for implementing Application Lifecycle Management (ALM) in Dynamics 365 Finance & Operations (D365FnO) using the Unified Developer Experience and Power Platform integration.
 
