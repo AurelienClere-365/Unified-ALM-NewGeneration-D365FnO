@@ -110,6 +110,7 @@ stages:
       displayName: 'Poll Refresh Status'
 
     - powershell: |
+        Start-Sleep -Seconds 600
         $tokenUrl = "https://login.microsoftonline.com/$(AAD_TENANT_ID)/oauth2/v2.0/token"
         $body = @{
           grant_type = "password"
