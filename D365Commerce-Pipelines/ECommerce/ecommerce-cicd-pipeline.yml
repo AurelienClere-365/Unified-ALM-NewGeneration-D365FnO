@@ -70,6 +70,8 @@ variables:
     value: '0000000'                        # <-- your LCS project ID (end of the project dashboard URL)
   - name: lcsAssetType
     value: '26'                             # LCS asset type code: 26 = e-Commerce package
+  - name: lcsDeploymentType
+    value: 'ecom'                           # LCS deployment type: ecom = e-Commerce package
 
   # --- UAT ---
   - name: uatBranch
@@ -241,7 +243,7 @@ stages:
                       projectId: '$(lcsProjectId)'
                       environmentId: '$(uatLcsEnvironmentId)'
                       fileAssetId: '$(lcsUpload.FileAssetId)'
-                      deploymentType: 'e-Commerce package'   # check with the task assistant (see README)
+                      deploymentType: '$(lcsDeploymentType)'
                       eCommerceName: '$(uatEcommerceName)'
                       releaseName: '$(buildPrefix) $(envLabel) - $(Build.BuildNumber)'
                       waitForCompletion: true
@@ -334,7 +336,7 @@ stages:
                       projectId: '$(lcsProjectId)'
                       environmentId: '$(prodLcsEnvironmentId)'
                       fileAssetId: '$(lcsUpload.FileAssetId)'
-                      deploymentType: 'e-Commerce package'   # check with the task assistant (see README)
+                      deploymentType: '$(lcsDeploymentType)'
                       eCommerceName: '$(prodEcommerceName)'
                       releaseName: '$(buildPrefix) $(envLabel) - $(Build.BuildNumber)'
                       waitForCompletion: true
