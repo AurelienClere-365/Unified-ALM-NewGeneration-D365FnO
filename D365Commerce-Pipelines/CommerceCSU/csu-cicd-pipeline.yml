@@ -1,6 +1,7 @@
 # =============================================================================
 # Dynamics 365 Commerce - Commerce Scale Unit (CSU) extension
 # Single CI/CD pipeline: build + deployment to UAT / PROD in one YAML file
+# Deployment mode: LCS (default) or Dataverse (selected when running manually)
 #
 # Based on the Microsoft sample repository Dynamics365Commerce.ScaleUnit
 # (independent packaging model, Commerce SDK 10.0.19 and later).
@@ -43,6 +44,15 @@ trigger:
 # Ignored by Azure Repos: PR builds come from the Branch Policy
 pr: none
 
+parameters:
+  - name: deploymentMode
+    displayName: 'Deployment mode'
+    type: string
+    default: LCS
+    values:
+      - LCS
+      - Dataverse
+
 pool:
   vmImage: 'windows-latest'     # VSBuild needs a Windows agent with Visual Studio
 
@@ -84,6 +94,8 @@ variables:
     value: '<UAT_CSU_NAME>'                 # <-- LCS > environment > Manage > Commerce > Commerce Scale Units
   - name: uatAdoEnvironment
     value: 'CSU-UAT'                        # Azure DevOps Environment (Pipelines > Environments)
+  - name: uatDataverseVariableGroup
+    value: 'Commerce-CSU-UAT'               # Dataverse mode only
 
   # --- PROD ---
   - name: prodBranch
@@ -94,6 +106,16 @@ variables:
     value: '<PROD_CSU_NAME>'
   - name: prodAdoEnvironment
     value: 'CSU-PROD'                       # put the manual approval on this Environment
+  - name: prodDataverseVariableGroup
+    value: 'Commerce-CSU-PROD'              # Dataverse mode only
+
+  # --- Dataverse mode only ---
+  - name: dataverseUploadScript
+    value: 'Pipeline/PowerShellScripts/DataverseClient/UploadCsuExtensionPackage.ps1'   # see the CSU README
+  - name: dataversePackageName
+    value: 'Contoso.Commerce.ScaleUnit'     # <-- package name shown in Dataverse
+  - name: dataversePackageVersion
+    value: '1.0.$(Build.BuildId)'           # package version shown in Dataverse
 
   # ===========================================================================
   # END OF CONFIGURATION
@@ -183,6 +205,8 @@ stages:
     variables:
       - name: envLabel
         value: 'UAT'
+      - ${{ if eq(parameters.deploymentMode, 'Dataverse') }}:
+        - group: ${{ variables.uatDataverseVariableGroup }}
     jobs:
       - deployment: Deploy_UAT
         displayName: 'Deploy CSU extension to UAT'
@@ -192,6 +216,10 @@ stages:
           runOnce:
             deploy:
               steps:
+                # Deployment jobs do not check out the repo by default (needed for the Dataverse script)
+                - checkout: self
+                  clean: true
+
                 - download: current
                   artifact: $(artifactName)
                   displayName: 'Download package'
@@ -208,29 +236,61 @@ stages:
                       Write-Host "Package: $($pkg.FullName)"
                       Write-Host "##vso[task.setvariable variable=PackagePath]$($pkg.FullName)"
 
-                - task: LCSAssetUpload@2
-                  name: lcsUpload
-                  displayName: 'Upload $(buildPrefix) $(envLabel) - build $(Build.BuildNumber)'
-                  inputs:
-                    serviceConnectionName: '${{ variables.lcsServiceConnection }}'
-                    projectId: '$(lcsProjectId)'
-                    assetType: '$(lcsAssetType)'
-                    assetPath: '$(PackagePath)'
-                    assetName: '$(Build.BuildNumber) $(envLabel)'
-                    assetDescription: '$(buildPrefix) $(envLabel) - $(Build.SourceBranchName) - $(Build.SourceVersion)'
-                    waitForValidation: true
+                # ----- LCS mode -----
+                - ${{ if eq(parameters.deploymentMode, 'LCS') }}:
+                  - task: LCSAssetUpload@2
+                    name: lcsUpload
+                    displayName: 'Upload $(buildPrefix) $(envLabel) - build $(Build.BuildNumber)'
+                    inputs:
+                      serviceConnectionName: '${{ variables.lcsServiceConnection }}'
+                      projectId: '$(lcsProjectId)'
+                      assetType: '$(lcsAssetType)'
+                      assetPath: '$(PackagePath)'
+                      assetName: '$(Build.BuildNumber) $(envLabel)'
+                      assetDescription: '$(buildPrefix) $(envLabel) - $(Build.SourceBranchName) - $(Build.SourceVersion)'
+                      waitForValidation: true
 
-                - task: LCSAssetDeploy@4
-                  displayName: 'Deploy to environment $(envLabel)'
-                  inputs:
-                    serviceConnectionName: '${{ variables.lcsServiceConnection }}'
-                    projectId: '$(lcsProjectId)'
-                    environmentId: '$(uatLcsEnvironmentId)'
-                    fileAssetId: '$(lcsUpload.FileAssetId)'
-                    deploymentType: 'Commerce Cloud Scale Unit Extension'   # check with the task assistant (see README)
-                    csuName: '$(uatCsuName)'                                 # check with the task assistant (see README)
-                    releaseName: '$(buildPrefix) $(envLabel) - $(Build.BuildNumber)'
-                    waitForCompletion: true
+                  - task: LCSAssetDeploy@4
+                    displayName: 'Deploy to environment $(envLabel)'
+                    inputs:
+                      serviceConnectionName: '${{ variables.lcsServiceConnection }}'
+                      projectId: '$(lcsProjectId)'
+                      environmentId: '$(uatLcsEnvironmentId)'
+                      fileAssetId: '$(lcsUpload.FileAssetId)'
+                      deploymentType: 'Commerce Cloud Scale Unit Extension'   # check with the task assistant (see README)
+                      csuName: '$(uatCsuName)'                                 # check with the task assistant (see README)
+                      releaseName: '$(buildPrefix) $(envLabel) - $(Build.BuildNumber)'
+                      waitForCompletion: true
+
+                # ----- Dataverse mode -----
+                - ${{ if eq(parameters.deploymentMode, 'Dataverse') }}:
+                  - task: PowerShell@2
+                    displayName: 'Upload CSU package to Dataverse ($(envLabel))'
+                    inputs:
+                      targetType: 'inline'
+                      pwsh: true
+                      script: |
+                        $ErrorActionPreference = 'Stop'
+
+                        # Rename the package as <Name>-<Version>.zip so that the upload script can read name and version
+                        $target = Join-Path '$(Agent.TempDirectory)' ('$(dataversePackageName)-$(dataversePackageVersion).zip')
+                        Copy-Item '$(PackagePath)' $target -Force
+                        Write-Host "Dataverse package: $target"
+
+                        $uploadParams = @{
+                            PackageFilePath  = $target
+                            PackageName      = '$(dataversePackageName)'
+                            PackagePublisher = '$(PackagePublisher)'
+                            EnvironmentUrl   = '$(DataverseUrl)'
+                            TenantId         = '$(TenantId)'
+                            ClientId         = '$(ClientId)'
+                            ClientSecret     = $env:CLIENT_SECRET
+                            ValidationStatus = 'Valid'
+                        }
+
+                        & "$(Build.SourcesDirectory)/$(dataverseUploadScript)" @uploadParams
+                    env:
+                      CLIENT_SECRET: $(ClientSecret)
 
   # ----- PROD -----
   - stage: Deploy_PROD
@@ -240,6 +300,8 @@ stages:
     variables:
       - name: envLabel
         value: 'PROD'
+      - ${{ if eq(parameters.deploymentMode, 'Dataverse') }}:
+        - group: ${{ variables.prodDataverseVariableGroup }}
     jobs:
       - deployment: Deploy_PROD
         displayName: 'Deploy CSU extension to PROD'
@@ -249,6 +311,10 @@ stages:
           runOnce:
             deploy:
               steps:
+                # Deployment jobs do not check out the repo by default (needed for the Dataverse script)
+                - checkout: self
+                  clean: true
+
                 - download: current
                   artifact: $(artifactName)
                   displayName: 'Download package'
@@ -265,26 +331,58 @@ stages:
                       Write-Host "Package: $($pkg.FullName)"
                       Write-Host "##vso[task.setvariable variable=PackagePath]$($pkg.FullName)"
 
-                - task: LCSAssetUpload@2
-                  name: lcsUpload
-                  displayName: 'Upload $(buildPrefix) $(envLabel) - build $(Build.BuildNumber)'
-                  inputs:
-                    serviceConnectionName: '${{ variables.lcsServiceConnection }}'
-                    projectId: '$(lcsProjectId)'
-                    assetType: '$(lcsAssetType)'
-                    assetPath: '$(PackagePath)'
-                    assetName: '$(Build.BuildNumber) $(envLabel)'
-                    assetDescription: '$(buildPrefix) $(envLabel) - $(Build.SourceBranchName) - $(Build.SourceVersion)'
-                    waitForValidation: true
+                # ----- LCS mode -----
+                - ${{ if eq(parameters.deploymentMode, 'LCS') }}:
+                  - task: LCSAssetUpload@2
+                    name: lcsUpload
+                    displayName: 'Upload $(buildPrefix) $(envLabel) - build $(Build.BuildNumber)'
+                    inputs:
+                      serviceConnectionName: '${{ variables.lcsServiceConnection }}'
+                      projectId: '$(lcsProjectId)'
+                      assetType: '$(lcsAssetType)'
+                      assetPath: '$(PackagePath)'
+                      assetName: '$(Build.BuildNumber) $(envLabel)'
+                      assetDescription: '$(buildPrefix) $(envLabel) - $(Build.SourceBranchName) - $(Build.SourceVersion)'
+                      waitForValidation: true
 
-                - task: LCSAssetDeploy@4
-                  displayName: 'Deploy to environment $(envLabel)'
-                  inputs:
-                    serviceConnectionName: '${{ variables.lcsServiceConnection }}'
-                    projectId: '$(lcsProjectId)'
-                    environmentId: '$(prodLcsEnvironmentId)'
-                    fileAssetId: '$(lcsUpload.FileAssetId)'
-                    deploymentType: 'Commerce Cloud Scale Unit Extension'   # check with the task assistant (see README)
-                    csuName: '$(prodCsuName)'                                 # check with the task assistant (see README)
-                    releaseName: '$(buildPrefix) $(envLabel) - $(Build.BuildNumber)'
-                    waitForCompletion: true
+                  - task: LCSAssetDeploy@4
+                    displayName: 'Deploy to environment $(envLabel)'
+                    inputs:
+                      serviceConnectionName: '${{ variables.lcsServiceConnection }}'
+                      projectId: '$(lcsProjectId)'
+                      environmentId: '$(prodLcsEnvironmentId)'
+                      fileAssetId: '$(lcsUpload.FileAssetId)'
+                      deploymentType: 'Commerce Cloud Scale Unit Extension'   # check with the task assistant (see README)
+                      csuName: '$(prodCsuName)'                                 # check with the task assistant (see README)
+                      releaseName: '$(buildPrefix) $(envLabel) - $(Build.BuildNumber)'
+                      waitForCompletion: true
+
+                # ----- Dataverse mode -----
+                - ${{ if eq(parameters.deploymentMode, 'Dataverse') }}:
+                  - task: PowerShell@2
+                    displayName: 'Upload CSU package to Dataverse ($(envLabel))'
+                    inputs:
+                      targetType: 'inline'
+                      pwsh: true
+                      script: |
+                        $ErrorActionPreference = 'Stop'
+
+                        # Rename the package as <Name>-<Version>.zip so that the upload script can read name and version
+                        $target = Join-Path '$(Agent.TempDirectory)' ('$(dataversePackageName)-$(dataversePackageVersion).zip')
+                        Copy-Item '$(PackagePath)' $target -Force
+                        Write-Host "Dataverse package: $target"
+
+                        $uploadParams = @{
+                            PackageFilePath  = $target
+                            PackageName      = '$(dataversePackageName)'
+                            PackagePublisher = '$(PackagePublisher)'
+                            EnvironmentUrl   = '$(DataverseUrl)'
+                            TenantId         = '$(TenantId)'
+                            ClientId         = '$(ClientId)'
+                            ClientSecret     = $env:CLIENT_SECRET
+                            ValidationStatus = 'Valid'
+                        }
+
+                        & "$(Build.SourcesDirectory)/$(dataverseUploadScript)" @uploadParams
+                    env:
+                      CLIENT_SECRET: $(ClientSecret)
