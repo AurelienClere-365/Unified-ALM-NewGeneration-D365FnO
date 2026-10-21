@@ -84,6 +84,8 @@ variables:
     value: '0000000'                        # <-- your LCS project ID (end of the project dashboard URL)
   - name: lcsAssetType
     value: '29'                             # LCS asset type code: 29 = Commerce Cloud Scale Unit Extension
+  - name: lcsDeploymentType
+    value: 'csu'                            # LCS deployment type: csu = Commerce Cloud Scale Unit Extension
 
   # --- UAT ---
   - name: uatBranch
@@ -257,7 +259,7 @@ stages:
                       projectId: '$(lcsProjectId)'
                       environmentId: '$(uatLcsEnvironmentId)'
                       fileAssetId: '$(lcsUpload.FileAssetId)'
-                      deploymentType: 'Commerce Cloud Scale Unit Extension'   # check with the task assistant (see README)
+                      deploymentType: '$(lcsDeploymentType)'
                       csuName: '$(uatCsuName)'                                 # check with the task assistant (see README)
                       releaseName: '$(buildPrefix) $(envLabel) - $(Build.BuildNumber)'
                       waitForCompletion: true
@@ -352,7 +354,7 @@ stages:
                       projectId: '$(lcsProjectId)'
                       environmentId: '$(prodLcsEnvironmentId)'
                       fileAssetId: '$(lcsUpload.FileAssetId)'
-                      deploymentType: 'Commerce Cloud Scale Unit Extension'   # check with the task assistant (see README)
+                      deploymentType: '$(lcsDeploymentType)'
                       csuName: '$(prodCsuName)'                                 # check with the task assistant (see README)
                       releaseName: '$(buildPrefix) $(envLabel) - $(Build.BuildNumber)'
                       waitForCompletion: true
