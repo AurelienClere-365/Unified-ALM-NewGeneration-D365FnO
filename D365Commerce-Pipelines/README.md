@@ -9,7 +9,7 @@ They are templates. Values such as `CONTOSO`, the LCS project ID, the service co
 | Folder | Pipeline file | Builds | Deploys to |
 |---|---|---|---|
 | `ECommerce/` | `ecommerce-cicd-pipeline.yml` | e-Commerce extension (`yarn msdyn365 pack`) | LCS e-Commerce environment (or Dataverse) |
-| `CommerceCSU/` | `csu-cicd-pipeline.yml` | Commerce Scale Unit extension (`CloudScaleUnitExtensionPackage.zip`) | LCS Commerce Scale Unit |
+| `CommerceCSU/` | `csu-cicd-pipeline.yml` | Commerce Scale Unit extension (`CloudScaleUnitExtensionPackage.zip`) | LCS Commerce Scale Unit (or Dataverse) |
 
 Each folder has its own README with the component-specific settings. This file covers what both pipelines share.
 
