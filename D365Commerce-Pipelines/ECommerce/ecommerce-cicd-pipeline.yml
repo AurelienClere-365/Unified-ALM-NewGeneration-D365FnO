@@ -60,6 +60,8 @@ variables:
     value: 'CONTOSO eCommerce'                # <-- your prefix
   - name: nodeVersion
     value: '24.x'
+  - name: NODE_OPTIONS
+    value: '--max_old_space_size=8192'
   - name: artifactName
     value: 'drop'
 
@@ -148,6 +150,12 @@ stages:
               script: yarn install --frozen-lockfile
               workingDirectory: '$(Build.SourcesDirectory)'
 
+          - task: PowerShell@2
+            displayName: 'Show Node heap limit'
+            inputs:
+              targetType: 'inline'
+              script: node -e "console.log(require('v8').getHeapStatistics().heap_size_limit/1024/1024 + ' MB')"
+              
           - task: PowerShell@2
             displayName: 'Build application'
             inputs:
