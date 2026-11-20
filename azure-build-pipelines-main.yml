@@ -77,6 +77,24 @@ stages:
               command: custom
               arguments: 'install -Noninteractive $(NugetConfigsPath)\packages.config -ConfigFile $(NugetConfigsPath)\nuget.config -Verbosity Detailed -ExcludeVersion -OutputDirectory "$(NugetsPath)"'
 
+          # Read the platform and application versions from packages.config, so the unified
+          # package is stamped with the versions that were restored (one place to update)
+          - task: PowerShell@2
+            displayName: 'Read package versions from packages.config'
+            inputs:
+              targetType: 'inline'
+              script: |
+                [xml]$config = Get-Content "$(NugetConfigsPath)\packages.config"
+                $platform = ($config.packages.package | Where-Object id -eq '$(PlatPackage)').version
+                $application = ($config.packages.package | Where-Object id -eq '$(AppSuitePackage)').version
+                if (-not $platform -or -not $application) {
+                  Write-Error "packages.config must list $(PlatPackage) and $(AppSuitePackage)"
+                  exit 1
+                }
+                Write-Host "Platform version: $platform / Application version: $application"
+                Write-Host "##vso[task.setvariable variable=PlatformVersion]$platform"
+                Write-Host "##vso[task.setvariable variable=ApplicationVersion]$application"
+
           # Use the custom build number y.m.d.rev as the model version
           - task: XppUpdateModelVersion@0
             displayName: 'Update Model Version'
@@ -118,20 +136,20 @@ stages:
               versionSpec: 3.3.0
 
           # Create Deployable Package
-          - task: XppCreatePackage@2
+          - task: XppCreatePackage@3
             displayName: Create Deployable Package
             inputs:
               XppToolsPath: '$(NuGetsPath)\$(ToolsPackage)'
               XppBinariesPath: '$(Build.BinariesDirectory)'
               CreateCloudPackage: true
-              CloudPackagePlatVersion: '7.0.7778.29'
-              CloudPackageAppVersion: '10.0.2428.63'
+              CloudPackagePlatVersion: '$(PlatformVersion)'
+              CloudPackageAppVersion: '$(ApplicationVersion)'
               CloudPackageOutputLocation: '$(Build.ArtifactStagingDirectory)\CloudDeployablePackage_$(Build.BuildNumber)'
               CreateRegularPackage: true
               DeployablePackagePath: '$(Build.ArtifactStagingDirectory)\AXDeployableRuntime_$(Build.BuildNumber).zip'
 
           # Enable to add license file to the package
-          - task: XppAddLicenseToPackage@0
+          - task: XppAddLicenseToPackage@1
             displayName: 'Add Licenses to Deployable Package'
             enabled: false
 
