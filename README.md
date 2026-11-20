@@ -66,7 +66,8 @@ Contributions are welcome! Feel free to:
 
 ## ⚠️ Notes
 
-- Ensure all pipeline tasks (e.g., Create Deployable Package, Add Licenses) use version 1 to support unified package generation.
+- Use **Create Deployable Package** task version 3 and **Add Licenses to Deployable Package** version 1 to generate the unified package ([Microsoft Learn](https://learn.microsoft.com/power-platform/developer/unified-experience/finance-operations-pipelines)).
+- The build pipelines read the platform and application versions for the unified package from `Tools\Build\packages.config`. After a quality update, update the versions in `packages.config` only.
 - If your models require licenses, include them in the `__License` folder or configure the licensing task accordingly.
 - Power Platform deployments require a service principal with appropriate permissions (e.g., System Administrator role in the target environment).
 
